@@ -3,9 +3,12 @@ package archive
 import (
 	"archive/tar"
 	"io"
-	"os"
+	"io/fs"
 	"path/filepath"
+	"os"
 	"strings"
+
+	"github.com/facebookgo/symwalk"
 )
 
 func Create(input_dir, output_file string) (err error) {
@@ -20,7 +23,7 @@ func Create(input_dir, output_file string) (err error) {
 	defer tw.Close()
 
 	// 再帰的にファイルを取得する
-	if err := filepath.Walk(input_dir, func(path string, info os.FileInfo, err error) error {
+	if err := symwalk.Walk(input_dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -30,12 +33,30 @@ func Create(input_dir, output_file string) (err error) {
 		}
 
 		intake_path := strings.Replace(path, input_dir, "", 1)
+		tar_mode := info.Mode()
+		tar_size := info.Size()
+
+		// To read symbolic links
+		if info.Mode() & fs.ModeSymlink != 0 {
+			path_sym, err := filepath.EvalSymlinks(path)
+			if err != nil {
+				return err
+			}
+			path = path_sym
+			stat, err := os.Stat(path_sym)
+			if err != nil {
+				return err
+			}
+			tar_mode = stat.Mode()
+			tar_size = stat.Size()
+		}
+
 		// write header
 		if err := tw.WriteHeader(&tar.Header{
 			Name:    intake_path,
-			Mode:    int64(info.Mode()),
+			Mode:    int64(tar_mode),
 			ModTime: info.ModTime(),
-			Size:    info.Size(),
+			Size:    tar_size,
 		}); err != nil {
 			return err
 		}
